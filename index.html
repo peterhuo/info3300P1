@@ -1,0 +1,313 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>INFO 3300 Project 1</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <script
+      type="text/javascript"
+      src="codegrid-js-master/src/codegrid.js"
+    ></script>
+    <style>
+      .country {
+        fill: lightgrey;
+      }
+
+      .outline {
+        fill: none;
+        stroke: black;
+        stroke-width: 1px;
+      }
+
+      .graticule {
+        fill: none;
+        stroke: grey;
+        stroke-width: 1px;
+      }
+
+      .tooltip {
+        pointer-events: none;
+      }
+
+      .gridlines line {
+        stroke: #ccc;
+      }
+    </style>
+  </head>
+
+  <body>
+    <p>Map visualization</p>
+    <svg
+      width="1200"
+      height="800"
+      id="map"
+      style="background: #445; margin-top: 40px"
+    ></svg>
+
+    <script>
+      const svg = d3.select("svg#map");
+      const width = svg.attr("width");
+      const height = svg.attr("height");
+      const margin = { top: 10, right: 10, bottom: 10, left: 10 };
+      const mapWidth = width - margin.left - margin.right;
+      const mapHeight = height - margin.top - margin.bottom;
+      const map = svg
+        .append("g")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+      const requestData = async function () {
+        const world = await d3.json("world-110m.v1.json");
+
+        var countries = topojson.feature(world, world.objects.countries);
+        var countriesMesh = topojson.mesh(world, world.objects.countries);
+        var projection = d3
+          .geoMercator()
+          .fitSize([mapWidth, mapHeight], countries);
+        var path = d3.geoPath().projection(projection);
+        console.log(projection);
+
+        let countriesPaths = map
+          .selectAll("path.country")
+          .data(countries.features)
+          .join("path")
+          .attr("class", "country")
+          .attr("note", (d) => d.id)
+          .attr("d", path);
+
+        map
+          .append("path")
+          .datum(countriesMesh)
+          .attr("class", "outline")
+          .attr("d", path);
+
+        meteorData = await d3.csv("Meteorite_Landings.csv", d3.autoType);
+
+        meteorData = meteorData.filter((d) => {
+          return (
+            d["reclat"] != null &&
+            d["reclong"] != null &&
+            !isNaN(d["reclat"]) &&
+            !isNaN(d["reclong"])
+          );
+        });
+
+        console.log(meteorData);
+
+        console.log(
+          projection([+meteorData[100]["reclong"], +meteorData[100]["reclat"]])
+        );
+
+        map
+          .selectAll("circle")
+          .data(meteorData)
+          .join("circle")
+          .attr("class", "point")
+          .attr("fill", "#2E8B57")
+          .attr("r", 2.5)
+          .attr("stroke", "black")
+          .attr("stroke-width", 0.4)
+          .attr("opacity", 0.25)
+          .attr("cx", (d) => projection([+d["reclong"], +d["reclat"]])[0])
+          .attr("cy", (d) => projection([+d["reclong"], +d["reclat"]])[1]);
+      };
+      requestData();
+    </script>
+    <p id="map description">
+      This is a visualization of meteorites hitting on the Earth. Each circle
+      represents the location of which the meteorite is found. The opacity is
+      reduced to better see overlaps. We can tell that the meteorites are
+      concentrated in central/south US, Europe, North Africa, and south
+      Austrialia.
+    </p>
+
+    <svg id="barchart" height="600" width="1200" style="margin-top: 50px"></svg>
+    <div id="button-bar"></div>
+
+    <script>
+      const svg2 = d3.select("svg#barchart");
+      const width2 = svg2.attr("width");
+      const height2 = svg2.attr("height");
+      const margin2 = { top: 10, right: 10, bottom: 50, left: 50 };
+      const chartWidth2 = width2 - margin2.left - margin2.right;
+      const chartHeight2 = height2 - margin2.top - margin2.bottom;
+
+      let annotations = svg2.append("g").attr("id", "annotations");
+      let chartArea = svg2
+        .append("g")
+        .attr("id", "points")
+        .attr("transform", `translate(${margin2.left},${margin2.top})`);
+      chartArea
+        .append("text")
+        .attr("x", chartWidth2 / 2)
+        .attr("y", 10)
+        .attr("text-anchor", "middle")
+        .attr("font-size", "24px")
+        .attr("font-weight", "bold")
+        .text("Top 10 Countries with the Most Meteorite Impacts");
+
+      const legend = chartArea
+        .append("g")
+        .attr("class", "legend")
+        .attr(
+          "transform",
+          `translate(${margin2.left + 100},${margin2.top + 35})`
+        );
+
+      d3.csv("Meteorite_Landings.csv", d3.autoType).then((data) => {
+        data.forEach((d) => {
+          d.year = parseInt(d.year);
+        });
+        // Filter out data that doesn't have the position of landing
+        data = data.filter((d) => !isNaN(d.reclat));
+        data = data.filter((d) => !isNaN(d.reclong));
+
+        var grid = codegrid.CodeGrid();
+        const codes = new Map();
+
+        async function processData() {
+          await Promise.all(
+            data.map(async (d) => {
+              const lat = d.reclat;
+              const lng = d.reclong;
+
+              try {
+                const code = await new Promise((resolve, reject) => {
+                  grid.getCode(lat, lng, (err, code) => {
+                    if (err) {
+                      reject(err);
+                    } else {
+                      resolve(code);
+                    }
+                  });
+                });
+
+                codes.set(String(code), (codes.get(String(code)) || 0) + 1);
+              } catch (error) {
+                console.error("Error:", error);
+              }
+            })
+          );
+
+          codes.delete("None");
+
+          const keyValueArray = Array.from(codes);
+          keyValueArray.sort((a, b) => b[1] - a[1]);
+          // console.log(keyValueArray);
+          const top10Array = keyValueArray.slice(0, 10);
+          // console.log(top10Array);
+
+          const regionNamesInEnglish = new Intl.DisplayNames(["en"], {
+            type: "region",
+          });
+
+          const top10Map = new Map();
+          top10Array.forEach((el) => {
+            top10Map.set(regionNamesInEnglish.of(el[0].toUpperCase()), el[1]);
+          });
+          // console.log(regionNamesInEnglish.of("OM"));
+          console.log(top10Map);
+          console.log(top10Map.keys());
+
+          const firstKey = top10Map.keys().next().value;
+          const firstValue = top10Map.get(firstKey);
+
+          const numberScale = d3
+            .scaleLinear()
+            .domain([0, firstValue + 100])
+            .range([chartHeight2, 0]);
+
+          const countryScale = d3
+            .scaleBand()
+            .domain(top10Map.keys())
+            .range([0, chartWidth2])
+            .padding(0.1);
+
+          const colorScale = d3
+            .scaleOrdinal()
+            .domain(top10Map.keys())
+            .range(d3.schemeCategory10);
+
+          let leftAxis = d3.axisLeft(numberScale);
+          let leftGridlines = d3
+            .axisLeft(numberScale)
+            .tickSize(-chartWidth2 - 10)
+            .tickFormat("");
+          annotations
+            .append("g")
+            .attr("class", "y axis")
+            .attr("transform", `translate(${margin2.left},${margin2.top + 20})`)
+            .call(leftAxis);
+          annotations
+            .append("g")
+            .attr("class", "y gridlines")
+            .attr("transform", `translate(${margin2.left},${margin2.top + 20})`)
+            .call(leftGridlines);
+
+          let bottomAxis = d3.axisBottom(countryScale);
+          annotations
+            .append("g")
+            .attr("class", "x axis")
+            .attr(
+              "transform",
+              `translate(${margin2.left},${chartHeight2 + margin2.top + 20})`
+            )
+            .call(bottomAxis);
+
+          chartArea
+            .selectAll("rect.bar")
+            .data(top10Map.entries())
+            .enter()
+            .append("rect")
+            .attr("class", "bar")
+            .attr("x", ([key]) => countryScale(key))
+            .attr("y", ([, value]) => numberScale(value) + 20)
+            .attr("width", countryScale.bandwidth())
+            .attr("height", ([, value]) => numberScale(0) - numberScale(value))
+            .attr("fill", ([key]) => colorScale(key));
+
+          // const legendKeys = [
+          //   "Oman",
+          //   "USA",
+          //   "Libya",
+          //   "Australia",
+          //   "Algeria",
+          //   "Chile",
+          //   "Morocco",
+          //   "Kenya",
+          //   "India",
+          //   "Russia",
+          // ];
+          // legend
+          //   .selectAll("rect")
+          //   .data(legendKeys)
+          //   .enter()
+          //   .append("rect")
+          //   .attr("x", (d, i) => i * 70)
+          //   .attr("width", 20)
+          //   .attr("height", 20)
+          //   .attr("fill", (d) => colorScale(d));
+
+          // // Create legend labels
+          // legend
+          //   .selectAll("text")
+          //   .data(legendKeys)
+          //   .enter()
+          //   .append("text")
+          //   .attr("x", (d, i) => i * 70 + 25)
+          //   .attr("y", 15)
+          //   .text((d) => d)
+          //   .attr("font-size", "12px");
+        }
+
+        processData();
+      });
+    </script>
+    <p id="bar graph description">
+      This is a bar graph showing the top 10 countries with the most meteorite
+      impacts. Each bar represents the occurrence of meteorite attacks within
+      each country and they are filled with different color in order to be more
+      distinguishable. According to the graph, we see a high occurrence of
+      meteorite attacks in Omen. There are also a high concentration of
+      meteorites in the US, countries in North Africa, and Australia.
+    </p>
+  </body>
+</html>
